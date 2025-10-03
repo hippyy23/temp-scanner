@@ -1,0 +1,7 @@
+{
+  "name": "temp-scanner",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular-standalone"
+}
