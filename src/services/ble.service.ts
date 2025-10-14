@@ -4,27 +4,31 @@ import { BehaviorSubject } from "rxjs";
 import { Capacitor } from "@capacitor/core";
 
 export interface TempSensor {
-    id: number;
+    id: string;
     temperature: number;
     rssi: number; // Signal strength
     name: string;
     lastUpdate: Date;
+    status: 'idle' | 'processing' | 'confirmed' | 'failed';
 }
 
 @Injectable({
     providedIn: 'root',
 })
 export class BleService {
-    private deviceMap = new Map<number, TempSensor>();
+    private deviceMap = new Map<string, TempSensor>();
     private devicesSubject = new BehaviorSubject<TempSensor[]>([])
     public devices$ = this.devicesSubject.asObservable();
-
     private isScanning = false;
+    private scanTimeout: any;
+
     private temperatureUpdateInterval: any;
     private deviceDiscoveryInterval: any;
 
     // Specific Service UUID from the ESP32
-    private readonly TEMP_SERVICE_UUID = "0000fd6f-0000-1000-8000-00805f9b34fb";
+    private readonly SERVICE_UUID = '0000fd6f-0000-1000-8000-00805f9b34fb';
+    private readonly ACK_CHAR_UUID = 'a495ff22-c5b1-4b44-b512-1370f02d74de';
+    private readonly CONFIRM_CHAR_UUID = 'a495ff23-c5b1-4b44-b512-1370f02d74de';
 
     constructor(private ngZone: NgZone) {}
 
@@ -44,7 +48,7 @@ export class BleService {
         this.deviceMap.clear();
         this.devicesSubject.next([]);
 
-        const mockDeviceIds = [0x1A, 0X2B, 0X3C];
+        const mockDeviceIds = ['0x1A', '0X2B', '0X3C'];
         let deviceIndex = 0;
 
         this.deviceDiscoveryInterval = setInterval(() => {
@@ -59,8 +63,9 @@ export class BleService {
                 id: deviceId,
                 temperature: parseFloat((22.5 + Math.random() * 5).toFixed(2)),
                 rssi: -50 - Math.floor(Math.random() * 20),
-                name: `ESP32_Mock_${deviceId.toString(16)}`,
+                name: `ESP32_Mock_`,
                 lastUpdate: new Date(),
+                status: 'confirmed',
             };
             
             this.deviceMap.set(newSensor.id, newSensor);
@@ -122,7 +127,6 @@ export class BleService {
             console.log("Scan already in progress");
             return;
         }
-        this.isScanning = true;
 
         // Check the platform
         if (Capacitor.getPlatform() === "web") {
@@ -131,29 +135,49 @@ export class BleService {
             return;
         }
 
-        // If not on the web, start the real scan
+        this.isScanning = true;
+        console.log("Continuous scan started");
+
+        this.scanLoop();
+    }
+
+    private async scanLoop(): Promise<void> {
+        if (!this.isScanning) return;
+
         try {
+            console.log("Starting scan burst...");
+
             await BleClient.requestLEScan(
                 {
-                    services: [this.TEMP_SERVICE_UUID], // Filter for predefined device
+                    services: [this.SERVICE_UUID],
                     allowDuplicates: true,
-                    scanMode: 2, // Low latency
                 },
                 (result) => this.onScanResult(result)
             );
 
-            console.log("BLE scan started");
+            this.scanTimeout = setTimeout(async () => {
+                console.log("Stopping scan burst...");
+                await BleClient.stopLEScan();
 
-            setTimeout(async () => {
-                await this.stopScan();
-            }, 10000);
+                this.scanTimeout = setTimeout(() => this.scanLoop(), 2500);
+            }, 2500);
+
         } catch (error) {
-            console.error("Error starting BLE scan: ", error);
-            // Handle permissions errors
+            console.error("Error during scan burst: ", error);
+            this.stopScan();
         }
     }
 
     async stopScan(): Promise<void> {
+        if (!this.isScanning) return;
+
+        console.log("Stopping continuous scan...");
+
+        if (this.scanTimeout) {
+            clearTimeout(this.scanTimeout);
+            this.scanTimeout = null;
+        }
+
         this.isScanning = false;
 
         if (Capacitor.getPlatform() === "web") {
@@ -163,49 +187,128 @@ export class BleService {
             console.log("Scan stopped");
         }
 
-        // this.deviceMap.clear();
-        // this.devicesSubject.next([]);
     }
 
     private onScanResult(result: ScanResult): void {
-        console.log("=== BLE DEVICE FOUND ===");
-        console.log("Name:", result.localName);
-        console.log("RSSI:", result.rssi);
-        console.log("All UUIDs:", result.uuids);
-        console.log("All Service Data keys:", result.serviceData ? Object.keys(result.serviceData) : "None");
+        const serviceData = result.serviceData?.[this.SERVICE_UUID];
 
-
-        if (!result.serviceData || !result.serviceData[this.TEMP_SERVICE_UUID]) {
-            return;
-        }
-
-        console.log("Found device: ", result.localName, "RSSI: ", result.rssi);
-
-        const serviceData = new DataView(result.serviceData[this.TEMP_SERVICE_UUID].buffer);
-
-        if (serviceData.byteLength < 5) return;
-
-        const deviceId = serviceData.getUint8(0);
-        const temperature = serviceData.getFloat32(1, true);
-
-        const sensor: TempSensor = {
-            id: deviceId,
-            temperature: parseFloat(temperature.toFixed(2)),
-            rssi: result.rssi || -1,
-            name: result.localName || `ESP32_${deviceId.toString(16)}`,
-            lastUpdate: new Date(),
-        };
-
-        // const mockSensor: TempSensor = {
-        //     id: Math.random() * 1000,
-        //     temperature: parseFloat((20 + Math.random() * 10).toFixed(2)),
-        //     rssi: result.rssi || -50,
-        //     name: result.localName || `ESP32_${Math.random().toString(16)}`,
-        //     lastUpdate: new Date(),
-        // }
+        if (!serviceData) return;
 
         this.ngZone.run(() => {
-            this.deviceMap.set(sensor.id, sensor);
+            const temperature = new DataView(serviceData.buffer).getFloat32(0, true);
+
+            const existingDevice = this.deviceMap.get(result.device.deviceId);
+
+            if (existingDevice) {
+                const updatedSensor: TempSensor = {
+                    ...existingDevice,
+                    temperature: parseFloat(temperature.toFixed(2)),
+                    rssi: result.rssi ?? -100,
+                    lastUpdate: new Date(),
+                };
+                this.deviceMap.set(result.device.deviceId, updatedSensor);
+            } else {
+                // Add new device with initial idle state
+                const newSensor: TempSensor = {
+                    id: result.device.deviceId,
+                    temperature: parseFloat(temperature.toFixed(2)),
+                    rssi: result.rssi ?? -100,
+                    name: result.localName || 'ESP32_Temp',
+                    lastUpdate: new Date(),
+                    status: 'idle',
+                };
+                this.deviceMap.set(newSensor.id, newSensor);
+            }
+
+            this.updateDevicesList();
+        });
+    }
+
+    async processSensorTransaction(sensorId: string): Promise<void> {
+        const sensor = this.deviceMap.get(sensorId);
+        if (!sensor || sensor.status === 'processing') return;
+
+        this.updateDeviceStatus(sensorId, 'processing');
+
+        try {
+            // Stop scanning to prepare for connection
+            if (this.isScanning) await this.stopScan();
+
+            // Connect to the device
+            await BleClient.connect(sensorId, (deviceId) => this.onDisconnect(deviceId));
+            console.log(`Connected to ${sensorId}`);
+
+            // Use a Promise to handle the asynchronous notification
+            await new Promise<void>(async (resolve, reject) => {
+                const transactinTimeout = setTimeout(() => {
+                    reject(new Error('Transaction time out after 10 seconds'));
+                }, 10000);
+                
+                // Subscribe to the confirmation characteristic
+                await BleClient.startNotifications(
+                    sensorId,
+                    this.SERVICE_UUID,
+                    this.CONFIRM_CHAR_UUID,
+                    (value) => {
+                        const confirmation = new TextDecoder().decode(value);
+                        console.log(`Received confirmation: ${confirmation}`);
+                        
+                        if (confirmation === 'CONFIRMED_OK') {
+                            console.log("Transaction confirmed");
+                            clearTimeout(transactinTimeout);
+                            this.updateDeviceStatus(sensorId, 'confirmed');
+                            setTimeout(() => {
+                                // Check if the device still exists and is still 'confirmed'
+                                const currentSensor = this.deviceMap.get(sensorId);
+                                if (currentSensor && currentSensor.status === 'confirmed') {
+                                    this.updateDeviceStatus(sensorId, 'idle');
+                                }
+                            }, 3000);
+                            resolve();
+                        }
+                    }
+                );
+
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                // After subscribing, send the acknowledgement
+                console.log('Sending acknowledgement...');
+                const ackMessage = new TextEncoder().encode('ACK_RECEIVED');
+                await BleClient.write(sensorId, this.SERVICE_UUID, this.ACK_CHAR_UUID, new DataView(ackMessage.buffer));
+            });
+        } catch (error) {
+            console.error(`Transaction failed for ${sensorId}:`, error);
+            this.updateDeviceStatus(sensorId, 'failed');
+            setTimeout(() => {
+                const currentSensor = this.deviceMap.get(sensorId);
+                if (currentSensor && currentSensor.status === 'failed') {
+                    this.updateDeviceStatus(sensorId, 'idle');
+                }
+            }, 3000);
+        } finally {
+            // Always disconnect to allow the sensor to resume advertising
+            console.log(`Disconnecting from ${sensorId}...`);
+            await BleClient.disconnect(sensorId).catch(err => console.error('Disconnect failed: ', err));
+        }
+
+        console.log("Transaction complete. Resuming continuous scan...");
+        await this.startScan();
+    }
+
+    private onDisconnect(deviceId: string) {
+        console.log(`Device ${deviceId} disconnected by peer`);
+        // this.updateDeviceStatus(deviceId, 'idle');
+    }
+
+    private updateDeviceStatus(sensorId:string, status: TempSensor['status']) {
+        if (this.deviceMap.has(sensorId)) {
+            this.deviceMap.get(sensorId)!.status = status;
+            this.updateDevicesList();
+        }
+    }
+
+    private updateDevicesList() {
+        this.ngZone.run(() => {
             this.devicesSubject.next(Array.from(this.deviceMap.values()));
         });
     }

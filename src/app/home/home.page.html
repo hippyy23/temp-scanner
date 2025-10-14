@@ -1,5 +1,5 @@
 <ion-header [translucent]="true">
-  <ion-toolbar>
+  <ion-toolbar color="primary">
     <ion-title>
       BLE Temp Scanner
     </ion-title>
@@ -15,17 +15,16 @@
 
   <div class="ion-padding">
     @if (!isScanning) {
-      <ion-button expand="block" (click)="scan()">
+      <ion-button expand="block" (click)="toggleScan()">
         <ion-icon slot="start" name="bluetooth-outline" />
-        Start scan
-      </ion-button>  
+        Start Scan
+      </ion-button>
     } @else {
-      <ion-button expand="block" (click)="scan()">
-        <ion-icon slot="start" name="stop" />
-        Stop scan
-      </ion-button>  
+      <ion-button expand="block" color="danger" (click)="toggleScan()">
+        <ion-icon slot="start" name="stop-outline" />
+        Stop Scan
+      </ion-button>
     }
-    
   </div>
 
   @if ((ble.devices$ | async); as devices) {
@@ -35,21 +34,41 @@
           <ion-label class="ion-text-center">No sensors found...</ion-label>
         </ion-item>
       }
-      
+
       @for (device of devices; track device.id) {
         <ion-item class="device-card">
-          <ion-icon slot="start" name="thermometer-outline" color="tertiary" />
+
+          <div slot="end" class="status-indicator">
+            <div class="status-dot" [class]="device.status"></div>
+          </div>
+
+          <ion-icon slot="start" name="thermometer-outline" [color]="device.status === 'idle' ? 'tertiary' : ''"></ion-icon>
+
           <ion-label>
-            <h2>Sensor ID: {{ device.id }}</h2>
-            <p>Name: {{ device.name }} || RSSI: {{ device.rssi }}</p>
+            <h2>{{ device.name }} (ID: ...{{ device.id.slice(-6) }})</h2>
+            <p>RSSI: {{ device.rssi }} | Last Update: {{ device.lastUpdate | date:'HH:mm:ss' }}</p>
+            <!-- @if(device.status !== 'idle') { -->
+              <p><strong>Status: {{ device.status }}</strong></p>
+            <!-- } -->
           </ion-label>
-          <div slot="end" class="temperature-reading">
-            {{ device.temperature }} °C
+
+          <div class="ion-text-nowrap" slot="end">
+            <span class="temperature-reading">{{ device.temperature }} °C</span>
+
+            <ion-button fill="outline" size="small"
+              (click)="acknowledge(device.id)"
+              [disabled]="device.status === 'processing' || device.status === 'confirmed'">
+                @if (device.status === 'processing') {
+                  <ion-spinner name="dots"></ion-spinner>
+                } @else if (device.status === 'confirmed') {
+                  <ion-icon name="checkmark-outline"></ion-icon>
+                } @else {
+                  ACK
+                }
+            </ion-button>
           </div>
         </ion-item>
       }
-      
     </ion-list>
   }
-  
 </ion-content>
