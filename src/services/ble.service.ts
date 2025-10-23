@@ -2,14 +2,26 @@ import { Injectable, NgZone } from "@angular/core";
 import { BleClient, ScanResult } from "@capacitor-community/bluetooth-le";
 import { BehaviorSubject } from "rxjs";
 import { Capacitor } from "@capacitor/core";
+import { Preferences } from '@capacitor/preferences';
+
+// Define the SensorData interface that corresponds to the binary struct
+export interface SensorData {
+    producedBy: string;
+    relayedBy: string;
+    measureCount: number;
+    measuredAt: Date;
+    temperature: number;
+    humidity: number;
+    stateOfEnergy: number;
+}
 
 export interface TempSensor {
     id: string;
-    temperature: number;
-    rssi: number; // Signal strength
     name: string;
+    rssi: number; // Signal strength
     lastUpdate: Date;
-    status: 'idle' | 'processing' | 'confirmed' | 'failed';
+    status: 'idle' | 'processing' | 'connected' | 'failed';
+    sensorData?: SensorData[];
 }
 
 @Injectable({
@@ -22,15 +34,43 @@ export class BleService {
     private isScanning = false;
     private scanTimeout: any;
 
-    private temperatureUpdateInterval: any;
-    private deviceDiscoveryInterval: any;
-
     // Specific Service UUID from the ESP32
     private readonly SERVICE_UUID = '0000fd6f-0000-1000-8000-00805f9b34fb';
     private readonly ACK_CHAR_UUID = 'a495ff22-c5b1-4b44-b512-1370f02d74de';
     private readonly CONFIRM_CHAR_UUID = 'a495ff23-c5b1-4b44-b512-1370f02d74de';
+    private readonly DATA_CHAR_UUID = 'a495ff24-c5b1-4b44-b512-1370f02d74de';
 
-    constructor(private ngZone: NgZone) {}
+    // State management
+    private connectedDeviceIdSubject: BehaviorSubject<string | null> = new BehaviorSubject<string | null>(null);
+    public connectedDeviceId$ = this.connectedDeviceIdSubject.asObservable();
+    private pendingAckIds = new Set<number>();
+    private sentAckIds = new Set<number>();
+    private readonly ACK_STORAGE_KEY = 'pendingAcks';
+
+    constructor(private ngZone: NgZone) {
+        this.loadPendingAcks();
+    }
+
+    // Persistent ACK storage
+    private async loadPendingAcks() {
+        try {
+            const { value } = await Preferences.get({ key: this.ACK_STORAGE_KEY });
+            if (value) {
+                this.pendingAckIds = new Set(JSON.parse(value));
+                console.log(`Loaded ${this.pendingAckIds.size} pending acks from storage`);
+            }
+        } catch (e) {
+            console.error("Could not load pending ACKs: ", e);
+        }
+    }
+
+    private async savePendingAcks() {
+        try {
+            await Preferences.set({ key: this.ACK_STORAGE_KEY, value: JSON.stringify(Array.from(this.pendingAckIds)) });
+        } catch (e) {
+            console.error("Could not save pending ACKs: ", e);
+        }
+    }
 
     async initialize(): Promise<void> {
         if (Capacitor.getPlatform() === "web") {
@@ -41,87 +81,6 @@ export class BleService {
         await BleClient.initialize();
     }
 
-    private startMockDevices(): void {
-        console.log("Starting mock BLE devices simulation")
-
-        // Clear any previous devices
-        this.deviceMap.clear();
-        this.devicesSubject.next([]);
-
-        const mockDeviceIds = ['0x1A', '0X2B', '0X3C'];
-        let deviceIndex = 0;
-
-        this.deviceDiscoveryInterval = setInterval(() => {
-            if (deviceIndex >= mockDeviceIds.length) {
-                clearInterval(this.deviceDiscoveryInterval);
-                console.log("All mock devices discovered");
-                return;
-            }
-
-            const deviceId = mockDeviceIds[deviceIndex];
-            const newSensor: TempSensor = {
-                id: deviceId,
-                temperature: parseFloat((22.5 + Math.random() * 5).toFixed(2)),
-                rssi: -50 - Math.floor(Math.random() * 20),
-                name: `ESP32_Mock_`,
-                lastUpdate: new Date(),
-                status: 'confirmed',
-            };
-            
-            this.deviceMap.set(newSensor.id, newSensor);
-            
-            this.ngZone.run(() => {
-                this.devicesSubject.next(Array.from(this.deviceMap.values()));
-            });
-
-            console.log(`Discovered device: ${newSensor.name}`);
-            deviceIndex++;
-
-        }, 1500);
-
-        // Conintuously update temperature every 2 seconds
-        this.temperatureUpdateInterval = setInterval(() => {
-            this.updateMockTemperatures();
-        }, 2000);
-    }
-
-    private updateMockTemperatures(): void {
-        if (this.deviceMap.size === 0) return;
-
-        this.deviceMap.forEach((sensor, deviceId) => {
-            const change = (Math.random() - 0.5) * 1;
-            const newTemp = sensor.temperature + change;
-
-            const clampedTemp = Math.max(18, Math.min(28, newTemp));
-
-            const newRssi = -50 - Math.floor(Math.random() * 20);
-            
-            const updateSensor: TempSensor = {
-                ...sensor,
-                temperature: parseFloat(clampedTemp.toFixed(2)),
-                rssi: newRssi,
-                lastUpdate: new Date(),
-            };
-            
-            this.deviceMap.set(deviceId, updateSensor);
-        });
-
-        this.ngZone.run(() => {
-            this.devicesSubject.next(Array.from(this.deviceMap.values()));
-        });
-
-        console.log("Update mock device temperatures: ", Array.from(this.deviceMap.values()));
-    }
-
-    private stopMockDevices(): void {
-        if (this.temperatureUpdateInterval) {
-            clearInterval(this.temperatureUpdateInterval);
-            this.temperatureUpdateInterval = null;
-        }
-
-        console.log("Stopped mock BLE devices simulation");
-    }
-
     async startScan(): Promise<void> {
         if (this.isScanning) {
             console.log("Scan already in progress");
@@ -130,14 +89,13 @@ export class BleService {
 
         // Check the platform
         if (Capacitor.getPlatform() === "web") {
-            // If we're on the web, run the mock scan
-            this.startMockDevices();
+            // If we're on the web
+            console.log("Running in web environment.");
             return;
         }
 
         this.isScanning = true;
         console.log("Continuous scan started");
-
         this.scanLoop();
     }
 
@@ -181,7 +139,7 @@ export class BleService {
         this.isScanning = false;
 
         if (Capacitor.getPlatform() === "web") {
-            this.stopMockDevices();
+            console.log("Scan stopped");
         } else {
             await BleClient.stopLEScan();
             console.log("Scan stopped");
@@ -190,114 +148,148 @@ export class BleService {
     }
 
     private onScanResult(result: ScanResult): void {
-        const serviceData = result.serviceData?.[this.SERVICE_UUID];
-
-        if (!serviceData) return;
-
         this.ngZone.run(() => {
-            const temperature = new DataView(serviceData.buffer).getFloat32(0, true);
-
             const existingDevice = this.deviceMap.get(result.device.deviceId);
 
-            if (existingDevice) {
-                const updatedSensor: TempSensor = {
-                    ...existingDevice,
-                    temperature: parseFloat(temperature.toFixed(2)),
-                    rssi: result.rssi ?? -100,
-                    lastUpdate: new Date(),
-                };
-                this.deviceMap.set(result.device.deviceId, updatedSensor);
-            } else {
-                // Add new device with initial idle state
+            if (!existingDevice) {
                 const newSensor: TempSensor = {
                     id: result.device.deviceId,
-                    temperature: parseFloat(temperature.toFixed(2)),
+                    name: result.localName || 'ESP32_Sensor',
                     rssi: result.rssi ?? -100,
-                    name: result.localName || 'ESP32_Temp',
                     lastUpdate: new Date(),
                     status: 'idle',
+                    sensorData: [],
                 };
-                this.deviceMap.set(newSensor.id, newSensor);
+                this.deviceMap.set(result.device.deviceId, newSensor);
+            } else {
+                existingDevice.rssi = result.rssi ?? -100;
+                existingDevice.lastUpdate = new Date();
             }
 
             this.updateDevicesList();
         });
     }
 
-    async processSensorTransaction(sensorId: string): Promise<void> {
+    async connectToSensor(sensorId: string): Promise<void> {
         const sensor = this.deviceMap.get(sensorId);
-        if (!sensor || sensor.status === 'processing') return;
 
-        this.updateDeviceStatus(sensorId, 'processing');
+        if (this.connectedDeviceIdSubject.value || !sensor) return;
 
         try {
-            // Stop scanning to prepare for connection
-            if (this.isScanning) await this.stopScan();
+            this.updateDeviceStatus(sensorId, 'processing');
+            await this.stopScan();
 
-            // Connect to the device
             await BleClient.connect(sensorId, (deviceId) => this.onDisconnect(deviceId));
-            console.log(`Connected to ${sensorId}`);
 
-            // Use a Promise to handle the asynchronous notification
-            await new Promise<void>(async (resolve, reject) => {
-                const transactinTimeout = setTimeout(() => {
-                    reject(new Error('Transaction time out after 10 seconds'));
-                }, 10000);
-                
-                // Subscribe to the confirmation characteristic
-                await BleClient.startNotifications(
-                    sensorId,
-                    this.SERVICE_UUID,
-                    this.CONFIRM_CHAR_UUID,
-                    (value) => {
-                        const confirmation = new TextDecoder().decode(value);
-                        console.log(`Received confirmation: ${confirmation}`);
-                        
-                        if (confirmation === 'CONFIRMED_OK') {
-                            console.log("Transaction confirmed");
-                            clearTimeout(transactinTimeout);
-                            this.updateDeviceStatus(sensorId, 'confirmed');
-                            setTimeout(() => {
-                                // Check if the device still exists and is still 'confirmed'
-                                const currentSensor = this.deviceMap.get(sensorId);
-                                if (currentSensor && currentSensor.status === 'confirmed') {
-                                    this.updateDeviceStatus(sensorId, 'idle');
-                                }
-                            }, 3000);
-                            resolve();
-                        }
+            this.connectedDeviceIdSubject.next(sensorId);
+            this.updateDeviceStatus(sensorId, 'connected');
+
+            sensor.sensorData = [];
+            this.updateDevicesList();
+
+            // Subscribe to the final confirmation from the sensor
+            await BleClient.startNotifications(
+                sensorId, this.SERVICE_UUID, this.CONFIRM_CHAR_UUID,
+                (value) => {
+                    const confirmation = new TextDecoder().decode(value);
+
+                    if (confirmation === 'CONFIRMED_OK') {
+                        console.log("Received final ACK confirmation form sensor");
+                        this.sentAckIds.forEach(id => this.pendingAckIds.delete(id));
+                        this.savePendingAcks();
+                        this.sentAckIds.clear();
                     }
-                );
-
-                await new Promise(resolve => setTimeout(resolve, 100));
-
-                // After subscribing, send the acknowledgement
-                console.log('Sending acknowledgement...');
-                const ackMessage = new TextEncoder().encode('ACK_RECEIVED');
-                await BleClient.write(sensorId, this.SERVICE_UUID, this.ACK_CHAR_UUID, new DataView(ackMessage.buffer));
-            });
-        } catch (error) {
-            console.error(`Transaction failed for ${sensorId}:`, error);
-            this.updateDeviceStatus(sensorId, 'failed');
-            setTimeout(() => {
-                const currentSensor = this.deviceMap.get(sensorId);
-                if (currentSensor && currentSensor.status === 'failed') {
-                    this.updateDeviceStatus(sensorId, 'idle');
                 }
-            }, 3000);
-        } finally {
-            // Always disconnect to allow the sensor to resume advertising
-            console.log(`Disconnecting from ${sensorId}...`);
-            await BleClient.disconnect(sensorId).catch(err => console.error('Disconnect failed: ', err));
+            );
+
+            // Subscribe to the data channel
+            await BleClient.startNotifications(
+                sensorId, this.SERVICE_UUID, this.DATA_CHAR_UUID,
+                (value) => {
+                    const jsonString = new TextDecoder().decode(value);
+
+                    try {
+                        const data: SensorData = JSON.parse(jsonString);
+                        console.log("Received sensor data: ", data.measureCount);
+
+                        // Add the new data to UI
+                        this.ngZone.run(() => {
+                            if (sensor.sensorData) {
+                                sensor.sensorData.push(data);
+                            } else {
+                                sensor.sensorData = [data];
+                            }
+                            this.updateDevicesList();
+                        });
+
+                        // Add ID to pending list and save
+                        this.pendingAckIds.add(data.measureCount);
+                        this.savePendingAcks();
+
+                       this.sendPendingAcks(); 
+                    } catch (e) {
+                        console.error("Error parsing sensor data: ", e);
+                    }
+                }
+            );
+
+            // Send all pending ACKs
+            await this.savePendingAcks();
+
+        } catch (error) {
+            console.error(`Failed to connect to ${sensorId}: ${error}`);
+            this.updateDeviceStatus(sensorId, 'failed');
+            this.onDisconnect(sensorId);
+        }
+    }
+
+    private async sendPendingAcks(): Promise<void> {
+        const connectedId = this.connectedDeviceIdSubject.value;
+
+        if (this.pendingAckIds.size === 0 || !connectedId) {
+            if (this.pendingAckIds.size === 0) console.log("No pending ACKs to send");
+            return;
         }
 
-        console.log("Transaction complete. Resuming continuous scan...");
-        await this.startScan();
+        try {
+            const idsToAck = Array.from(this.pendingAckIds);
+            this.sentAckIds = new Set(idsToAck);
+
+            const ackPayload = { acks: idsToAck };
+            const ackMessage = JSON.stringify(ackPayload);
+            const encodedMessage = new TextEncoder().encode(ackMessage);
+
+            await BleClient.write(
+                connectedId,
+                this.SERVICE_UUID,
+                this.ACK_CHAR_UUID,
+                new DataView(encodedMessage.buffer)
+            );
+
+            console.log(`Sent batch ACK for ${idsToAck.length} packets`);
+        } catch (error) {
+            console.error("Failed to send batch ACK: ", error);
+        }
+    }
+
+    async disconnect(): Promise<void> {
+        const connectedId = this.connectedDeviceIdSubject.value;
+        if (!connectedId) return;
+
+        try {
+            await BleClient.disconnect(connectedId);
+        } catch (error) {
+            console.error("Failed to disconnect: ", error);
+        }
     }
 
     private onDisconnect(deviceId: string) {
-        console.log(`Device ${deviceId} disconnected by peer`);
-        // this.updateDeviceStatus(deviceId, 'idle');
+        console.log(`Device ${deviceId} disconnected`);
+        this.connectedDeviceIdSubject.next(null);
+        this.updateDeviceStatus(deviceId, 'idle');
+        this.sentAckIds.clear();
+
+        this.startScan();
     }
 
     private updateDeviceStatus(sensorId:string, status: TempSensor['status']) {
@@ -319,5 +311,8 @@ export class BleService {
 
     ngOnDestroy(): void {
         this.stopScan();
+        if (this.connectedDeviceIdSubject.value) {
+            this.disconnect();
+        }
     }
 }

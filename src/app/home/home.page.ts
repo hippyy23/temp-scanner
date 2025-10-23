@@ -1,15 +1,48 @@
 import { Component, OnInit } from '@angular/core';
 import { BleService, TempSensor } from 'src/services/ble.service';
-import { IonHeader, IonToolbar, IonTitle, IonContent, IonButton, IonIcon, IonItem, IonLabel, IonList, IonSpinner } from '@ionic/angular/standalone';
-import { AsyncPipe, DatePipe } from '@angular/common';
+import { 
+  IonHeader,
+  IonToolbar,
+  IonTitle,
+  IonContent,
+  IonButton,
+  IonIcon,
+  IonItem,
+  IonLabel,
+  IonList,
+  IonListHeader,
+  IonSpinner,
+  IonCard,
+  IonCardContent,
+  IonCardHeader,
+  IonCardTitle,
+  IonCardSubtitle,
+  IonNote,
+} from '@ionic/angular/standalone';
+import { AsyncPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { addIcons } from 'ionicons';
-import { bluetoothOutline, thermometerOutline, stopOutline, checkmarkOutline } from 'ionicons/icons';
+import {
+  bluetoothOutline,
+  thermometerOutline,
+  stopOutline,
+  checkmarkOutline,
+  logInOutline,
+  logOutOutline,
+  closeCircleOutline,
+  timeOutline,
+  waterOutline,
+  flashOutline,
+  repeatOutline,
+  hardwareChipOutline,
+  documentTextOutline,
+} from 'ionicons/icons';
 
 @Component({
   selector: 'app-home',
   templateUrl: 'home.page.html',
   styleUrls: ['home.page.scss'],
-  imports: [IonList, IonLabel, IonItem, IonIcon, IonButton, IonHeader, IonToolbar, IonTitle, IonContent, IonSpinner, AsyncPipe, DatePipe],
+  imports: [IonList, IonLabel, IonItem, IonCard, IonCardHeader, IonCardTitle, IonCardSubtitle, IonCardContent, IonNote, IonListHeader,
+            IonIcon, IonButton, IonHeader, IonToolbar, IonTitle, IonContent, IonSpinner, AsyncPipe, DatePipe, DecimalPipe],
 })
 export class HomePage implements OnInit {
   isScanning = false;
@@ -20,6 +53,15 @@ export class HomePage implements OnInit {
       thermometerOutline,
       stopOutline,
       checkmarkOutline,
+      logInOutline,
+      logOutOutline,
+      closeCircleOutline,
+      timeOutline,
+      waterOutline,
+      flashOutline,
+      repeatOutline,
+      hardwareChipOutline,
+      documentTextOutline
     });
   }
 
@@ -37,16 +79,11 @@ export class HomePage implements OnInit {
     }
   }
 
-  acknowledge(sensorId: string): void {
-    console.log(`UI requesting acknowledgement for sensor: ${sensorId}`);
-    this.ble.processSensorTransaction(sensorId);
-  }
-
   getStatusColor(status: TempSensor['status']): string | undefined {
     switch (status) {
       case 'processing':
         return 'light';
-      case 'confirmed':
+      case 'connected':
         return 'success';
       case 'failed':
         return 'danger';

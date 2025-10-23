@@ -1,7 +1,7 @@
 <ion-header [translucent]="true">
   <ion-toolbar color="primary">
     <ion-title>
-      BLE Temp Scanner
+      BLE Sensor Gateway
     </ion-title>
   </ion-toolbar>
 </ion-header>
@@ -9,7 +9,7 @@
 <ion-content [fullscreen]="true">
   <ion-header collapse="condense">
     <ion-toolbar>
-      <ion-title size="large">BLE Temp Scanner</ion-title>
+      <ion-title size="large">BLE Sensor Gateway</ion-title>
     </ion-toolbar>
   </ion-header>
 
@@ -29,45 +29,81 @@
 
   @if ((ble.devices$ | async); as devices) {
     <ion-list>
-      @if (devices.length === 0) {
+      @if (devices.length === 0 && isScanning) {
         <ion-item lines="none">
-          <ion-label class="ion-text-center">No sensors found...</ion-label>
+          <ion-label class="ion-text-center">Scanning for sensors...</ion-label>
+        </ion-item>
+      } @else if (devices.length === 0 && !isScanning) {
+        <ion-item lines="none">
+          <ion-label class="ion-text-center">No sensors found. Start a scan to begin.</ion-label>
         </ion-item>
       }
 
       @for (device of devices; track device.id) {
-        <ion-item class="device-card">
-
-          <div slot="end" class="status-indicator">
-            <div class="status-dot" [class]="device.status"></div>
-          </div>
-
-          <ion-icon slot="start" name="thermometer-outline" [color]="device.status === 'idle' ? 'tertiary' : ''"></ion-icon>
-
-          <ion-label>
-            <h2>{{ device.name }} (ID: ...{{ device.id.slice(-6) }})</h2>
-            <p>RSSI: {{ device.rssi }} | Last Update: {{ device.lastUpdate | date:'HH:mm:ss' }}</p>
-            <!-- @if(device.status !== 'idle') { -->
-              <p><strong>Status: {{ device.status }}</strong></p>
-            <!-- } -->
-          </ion-label>
-
-          <div class="ion-text-nowrap" slot="end">
-            <span class="temperature-reading">{{ device.temperature }} °C</span>
-
-            <ion-button fill="outline" size="small"
-              (click)="acknowledge(device.id)"
-              [disabled]="device.status === 'processing' || device.status === 'confirmed'">
-                @if (device.status === 'processing') {
-                  <ion-spinner name="dots"></ion-spinner>
-                } @else if (device.status === 'confirmed') {
-                  <ion-icon name="checkmark-outline"></ion-icon>
-                } @else {
-                  ACK
+        <ion-card class="device-card" [class.device-connected]="device.status === 'connected'">
+          <ion-card-header>
+            <ion-card-title>
+              <div class="card-title-container">
+                <div class="status-dot" [class]="device.status"></div>
+                <span>{{ device.name }}</span>
+                
+                @if (device.sensorData && device.sensorData.length > 0) {
+                  <div class="ion-text-nowrap" slot="end">
+                    <span class="temperature-reading">
+                      {{ device.sensorData[device.sensorData.length - 1].temperature | number:'1.1-1' }} °C
+                    </span>
+                  </div>
                 }
+              </div>
+            </ion-card-title>
+            <ion-card-subtitle>
+              Device ID: ...{{ device.id.slice(-6) }} | RSSI: {{ device.rssi }}
+            </ion-card-subtitle>
+          </ion-card-header>
+
+          <ion-card-content>
+            <ion-button class="connect-button" fill="outline" expand="block"
+              (click)="device.status === 'connected' ? ble.disconnect() : ble.connectToSensor(device.id)"
+              [disabled]="device.status === 'processing' || (!!(ble.connectedDeviceId$ | async)) && device.status !== 'connected'">
+              
+              @if (device.status === 'processing') {
+                <ion-spinner name="dots"></ion-spinner>
+              } @else if (device.status === 'connected') {
+                <ion-icon slot="start" name="log-out-outline"></ion-icon>
+                Disconnect
+              } @else if (device.status === 'failed') {
+                <ion-icon slot="start" name="close-circle-outline"></ion-icon>
+                Retry Connection
+              } @else {
+                <ion-icon slot="start" name="log-in-outline"></ion-icon>
+                Connect and Download Data
+              }
             </ion-button>
-          </div>
-        </ion-item>
+
+            @if (device.status === 'connected' && device.sensorData && device.sensorData.length > 0) {
+              <div class="data-history-container">
+                <ion-list-header>Downloaded Data ({{ device.sensorData.length }} packets)</ion-list-header>
+                <ion-list lines="full" class="details-list">
+                  @for (data of device.sensorData; track data.measureCount) {
+                    <ion-item>
+                      <ion-icon name="document-text-outline" slot="start" color="medium"></ion-icon>
+                      <ion-label>
+                        <h3>Count: {{ data.measureCount }}</h3>
+                        <p>{{ data.measuredAt | date:'HH:mm:ss' }} | Temp: {{ data.temperature }}°C | Hum: {{ data.humidity }}%</p>
+                      </ion-label>
+                      <ion-note slot="end">{{ data.stateOfEnergy }}% SoE</ion-note>
+                    </ion-item>
+                  }
+                </ion-list>
+              </div>
+            } @else if (device.status === 'connected' && (!device.sensorData || device.sensorData.length === 0)) {
+              <div class="data-history-container ion-text-center">
+                <ion-label color="medium"><p>Connected. Waiting for data...</p></ion-label>
+              </div>
+            }
+
+          </ion-card-content>
+        </ion-card>
       }
     </ion-list>
   }

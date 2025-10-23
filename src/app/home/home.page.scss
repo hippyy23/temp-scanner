@@ -1,70 +1,87 @@
-#container {
-  text-align: center;
-
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
+.device-card {
+  margin-bottom: 16px;
+  transition: box-shadow 0.3s ease-in-out;
+  
+  // Highlight the connected device with a colored shadow
+  &.device-connected {
+    box-shadow: 0px 0px 10px var(--ion-color-primary);
+  }
 }
 
-#container strong {
-  font-size: 20px;
-  line-height: 26px;
-}
-
-#container p {
-  font-size: 16px;
-  line-height: 22px;
-
-  color: #8c8c8c;
-
-  margin: 0;
-}
-
-#container a {
-  text-decoration: none;
-}
-
-.status-indicator {
+.card-title-container {
   display: flex;
   align-items: center;
-  margin-right: 8px;
+  justify-content: space-between;
+  width: 100%;
 }
 
+.temperature-reading {
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: var(--ion-color-primary);
+}
+
+.connect-button {
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+
+.data-history-container {
+  margin-top: 20px;
+  border-top: 1px solid var(--ion-color-step-200, #e0e0e0);
+  padding-top: 10px;
+}
+
+.details-list {
+  --inner-padding-end: 0;
+  max-height: 200px; // Make the list scrollable if it gets too long
+  overflow-y: auto;
+  border: 1px solid var(--ion-color-step-200, #e0e0e0);
+  border-radius: 8px;
+
+  ion-item {
+    --padding-start: 8px;
+    font-size: 0.9rem;
+
+    h3 {
+      font-weight: bold;
+      font-size: 0.9rem;
+      color: var(--ion-color-primary);
+    }
+    p {
+      font-size: 0.8rem;
+    }
+    ion-note {
+      font-size: 0.9rem;
+    }
+  }
+}
+
+// Status Dot Styling with animation for 'processing'
 .status-dot {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  transition: all 0.3s ease;;
+  margin-right: 12px;
+  background-color: #ccc;
 
   &.idle {
     background-color: var(--ion-color-medium);
   }
-
   &.processing {
     background-color: var(--ion-color-warning);
-    animation: pulse 1.5s infinite;
+    animation: pulse 1s infinite;
   }
-  
   &.confirmed {
     background-color: var(--ion-color-success);
   }
-  
-  &.error {
+  &.failed {
     background-color: var(--ion-color-danger);
   }
 }
 
 @keyframes pulse {
-  0% { opacity: 1; }
-  50% { opacity: 0.5; }
-  100% { opacity: 1; }
-}
-
-.temperature-reading {
-  font-size: 1.2em;
-  font-weight: bold;
-  color: var(--ion-color-dark);
-  margin-right: 8px;
+  0% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+  100% { transform: scale(1); }
 }
