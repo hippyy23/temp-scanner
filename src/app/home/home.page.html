@@ -76,9 +76,42 @@
                 Retry Connection
               } @else {
                 <ion-icon slot="start" name="log-in-outline"></ion-icon>
-                Connect and Download Data
+                Connect
               }
             </ion-button>
+
+            @if (device.status === 'connected') {
+              <div class="sensor-controls-container">
+                <ion-list-header>Sensor Controls</ion-list-header>
+                <ion-item lines="none">
+                  @if (device.isCollecting === true) {
+                    <ion-icon slot="start" name="play-circle-outline" color="success"></ion-icon>
+                    <ion-label>Status: <ion-text color="success">Collecting</ion-text></ion-label>
+                    <ion-button slot="end" fill="outline" color="danger" (click)="ble.sendStopCommand(device.id)">
+                      <ion-icon slot="icon-only" name="pause-circle-outline"></ion-icon>
+                      Stop
+                    </ion-button>
+                  } @else if (device.isCollecting === false) {
+                    <ion-icon slot="start" name="pause-circle-outline" color="medium"></ion-icon>
+                    <ion-label>Status: <ion-text color="medium">Stopped</ion-text></ion-label>
+                    <ion-button slot="end" fill="outline" color="success" (click)="ble.sendStartCommand(device.id)">
+                      <ion-icon slot="icon-only" name="play-circle-outline"></ion-icon>
+                      Start
+                    </ion-button>
+                  } @else {
+                    <ion-label>Status: Reading...</ion-label>
+                    <ion-spinner slot="end" name="crescent"></ion-spinner>
+                  }
+                </ion-item>
+                <ion-item lines="none">
+                  <ion-label>Data Transfer</ion-label>
+                  <ion-button slot="end" fill="outline" (click)="ble.requestData(device.id, device.lastKnownMeasureCount)">
+                     <ion-icon slot="start" name="download-outline"></ion-icon>
+                     Download
+                  </ion-button>
+                </ion-item>
+              </div>
+            }
 
             @if (device.status === 'connected' && device.sensorData && device.sensorData.length > 0) {
               <div class="data-history-container">

@@ -17,8 +17,7 @@ import {
   IonCardHeader,
   IonCardTitle,
   IonCardSubtitle,
-  IonNote,
-} from '@ionic/angular/standalone';
+  IonNote, IonText } from '@ionic/angular/standalone';
 import { AsyncPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { addIcons } from 'ionicons';
 import {
@@ -35,13 +34,16 @@ import {
   repeatOutline,
   hardwareChipOutline,
   documentTextOutline,
+  playCircleOutline,
+  pauseCircleOutline,
+  downloadOutline
 } from 'ionicons/icons';
 
 @Component({
   selector: 'app-home',
   templateUrl: 'home.page.html',
   styleUrls: ['home.page.scss'],
-  imports: [IonList, IonLabel, IonItem, IonCard, IonCardHeader, IonCardTitle, IonCardSubtitle, IonCardContent, IonNote, IonListHeader,
+  imports: [IonText, IonList, IonLabel, IonItem, IonCard, IonCardHeader, IonCardTitle, IonCardSubtitle, IonCardContent, IonNote, IonListHeader,
             IonIcon, IonButton, IonHeader, IonToolbar, IonTitle, IonContent, IonSpinner, AsyncPipe, DatePipe, DecimalPipe],
 })
 export class HomePage implements OnInit {
@@ -61,7 +63,10 @@ export class HomePage implements OnInit {
       flashOutline,
       repeatOutline,
       hardwareChipOutline,
-      documentTextOutline
+      documentTextOutline,
+      playCircleOutline,
+      pauseCircleOutline,
+      downloadOutline
     });
   }
 
